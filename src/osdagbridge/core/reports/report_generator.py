@@ -103,12 +103,12 @@
 #                                                          else → CustomMessageBox("Report Saved")
 #==============================================================================
 
-import os, shutil, logging, datetime, tempfile, subprocess
+import os, re, shutil, logging, datetime, tempfile, subprocess
 from dataclasses import dataclass, field
 from typing import Optional, List, Literal
 
 from osdagbridge.core.utils.common import (
-    KEY_DESIGN_MODE,
+    KEY_MP_ED_BRACING_SECTION_DESIGNATION,
     KEY_SPAN,
     KEY_TL_BRIDGE_TEMP_MAX,
     KEY_TL_BRIDGE_TEMP_MIN,
@@ -119,6 +119,10 @@ from osdagbridge.core.utils.common import (
 )
 
 from osdagbridge.core.reports.report_utils import _tex
+from osdagbridge.core.reports.styles import (
+    THEME, status_tex, fancy_page_style, geometry_options, style_preamble,
+)
+from osdagbridge.core.reports.tables import simple_tabular
 from .executive_summary import executive_summary
 from .chap1 import ch1_project_info
 from .chap2 import ch2_input_parameters
@@ -152,107 +156,76 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
     jn = _tex(job_number)
     rd = _tex(report_date)
     rv = _tex(report_version)
+    # plain text for the PDF properties (no LaTeX markup allowed there)
+    pdf_title = re.sub(r"[^A-Za-z0-9 ,.()/-]+", " ", str(project_name or "")).strip()
+    left_head = pn + (r" $|$ " + jn if jn else "")
+    right_head = rd + (r" $|$ " + rv if rv else "")
     return r"""
-\documentclass[12pt,a4paper]{report}
+\documentclass[""" + THEME.page.font_size + "," + THEME.page.paper + r"""]{report}
 
 % Packages
-\usepackage[a4paper, margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[""" + geometry_options() + r"""]{geometry}
+\usepackage{microtype}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{textcomp}
+\usepackage{gensymb}
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{tabularx}
 \usepackage{float}
 \usepackage{fancyhdr}
-\usepackage[hidelinks]{hyperref}
-\usepackage{xcolor}
+\usepackage[table]{xcolor}
 \usepackage{setspace}
 \usepackage{enumitem}
 \usepackage{caption}
-
 \captionsetup{
     labelfont=bf,
+    font=small,
     justification=raggedright,
     singlelinecheck=false,
     format=plain
 }
 \usepackage{subcaption}
 \usepackage{multirow}
-\usepackage{colortbl}
 \usepackage{longtable}
-\setlength{\LTleft}{\fill}
-\setlength{\LTright}{\fill}
 \usepackage{titlesec}
 \usepackage{titletoc}
 \usepackage{lastpage}
 \usepackage{makecell}
 \usepackage{etoolbox}
 \usepackage{needspace}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{
+    pdftitle={OsdagBridge Design Report""" + (" - " + pdf_title if pdf_title else "") + r"""},
+    pdfsubject={Steel plate girder bridge design report},
+    pdfcreator={OsdagBridge},
+    bookmarksnumbered=true,
+    bookmarksopen=true
+}
 
 \numberwithin{table}{chapter}
 \numberwithin{figure}{chapter}
-% Table layout and spacing: consistent padding, row height, and longtable pre/post skips
-\setlength{\tabcolsep}{6pt}
-\renewcommand{\arraystretch}{1.12}
-\setlength{\LTpre}{0pt}
-\setlength{\LTpost}{6pt}
-% Table rules (outline thickness) and small extra row height for clarity
-\setlength{\arrayrulewidth}{0.5pt}
-\setlength{\extrarowheight}{0.6pt}
+\setlist{itemsep=2pt, topsep=4pt}
 
-% Prevent tables from overflowing past the page bottom:
-% if fewer than 5 baseline-skips remain, break to the next page first.
-\BeforeBeginEnvironment{table}{\needspace{5\baselineskip}}
-\BeforeBeginEnvironment{longtable}{\needspace{5\baselineskip}}
+""" + style_preamble() + r"""
 
-\definecolor{osdagGreen}{HTML}{91B014}
+% Software-default asterisk: \sdstar marks the value and flags the page so the
+% footer prints the "* Software default value" note.
+\newbool{hasSDonPage}
+\boolfalse{hasSDonPage}
+\newcommand{\markSD}{\global\booltrue{hasSDonPage}}
+\newcommand{\sdstar}{\textsuperscript{*}\markSD{}}
+\AddToHook{shipout/after}{\global\boolfalse{hasSDonPage}}
 
-\fancypagestyle{main}{
-  \fancyhf{}
-  \fancyhead[L]{""" + pn + r""" $|$ """ + jn + r"""}
-  \fancyhead[R]{""" + rd + r""" $|$ """ + rv + r"""}
-  \fancyfoot[L]{Osdag $|$ FOSSEE $|$ Indian Institute of Technology Bombay}
-  \fancyfoot[R]{Page \thepage\ of \pageref{LastPage}}
-  \renewcommand{\headrule}{\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{2pt}}
-  \renewcommand{\footrule}{%
-    \ifbool{hasSDonPage}{%
-      \vspace{-20pt}%
-      \hbox to \headwidth{\textcolor{black}{\footnotesize\textit{* Software default value}}\hfil}%
-      \vspace{4pt}%
-    }{%
-      \vspace{-8pt}%
-    }%
-    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}%
-  }
-}
-\fancypagestyle{plain}{
-  \fancyhf{}
-  \fancyhead[L]{""" + pn + r""" $|$ """ + jn + r"""}
-  \fancyhead[R]{""" + rd + r""" $|$ """ + rv + r"""}
-  \fancyfoot[L]{Osdag $|$ FOSSEE $|$ Indian Institute of Technology Bombay}
-  \fancyfoot[R]{Page \thepage\ of \pageref{LastPage}}
-  \renewcommand{\headrule}{\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{2pt}}
-  \renewcommand{\footrule}{%
-    \ifbool{hasSDonPage}{%
-      \vspace{-20pt}%
-      \hbox to \headwidth{\textcolor{black}{\footnotesize\textit{* Software default value}}\hfil}%
-      \vspace{4pt}%
-    }{%
-      \vspace{-8pt}%
-    }%
-    \color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}%
-  }
-}
-\fancypagestyle{firstpage}{
-  \fancyhf{}
-  \renewcommand{\headrulewidth}{0pt}
-  \fancyfoot[L]{Osdag $|$ FOSSEE $|$ Indian Institute of Technology Bombay}
-  \fancyfoot[R]{Page \thepage\ of \pageref{LastPage}}
-  \renewcommand{\footrule}{\vspace{-8pt}\color{osdagGreen}\hrule width\headwidth height 1pt \vspace{6pt}}
-}
+""" + fancy_page_style("main", left_head, right_head) + "\n" \
+    + fancy_page_style("plain", left_head, right_head) + "\n" \
+    + fancy_page_style("firstpage", "", "", with_head=False) + r"""
 \pagestyle{main}
-\setstretch{1.15}
 
 % Custom Commands
 \newcommand{\placeholder}[1]{\textit{\textless #1\textgreater}}
@@ -260,18 +233,6 @@ def preamble(project_name, job_number, report_date, report_version='Rev 0'):
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
 \newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
-
-% Software-default asterisk
-\newcommand{\sdstar}{\textsuperscript{*}}
-\newbool{hasSDonPage}
-\boolfalse{hasSDonPage}
-\newcommand{\markSD}{\global\booltrue{hasSDonPage}}
-\renewcommand{\sdstar}{\textsuperscript{*}\markSD{}}
-\AddToHook{shipout/before}{\global\boolfalse{hasSDonPage}}
-
-\title{\Large\textbf{OsdagBridge} \\ \normalsize Open Source Software for Steel Girder Bridge Design \\ \vspace{2cm} \large Design Report}
-\author{}
-\date{}
 
 \begin{document}
 """
@@ -305,37 +266,36 @@ def title_page(m, osdag_logo, org_logo):
 \\[1cm]
 """
 
+    info = simple_tabular([
+        ("Project Name", _tex(m.project_name)),
+        ("Project Location", _tex(m.project_location)),
+        ("Author / Designer", _tex(m.designer)),
+        ("Reviewer", _tex(m.reviewer)),
+        ("Organization", _tex(m.company)),
+        ("Client Name and Organization", _tex(m.client)),
+        ("Job Number", _tex(m.job_number)),
+        ("Date", _tex(m.report_date)),
+        ("Report Version", _tex(m.subtitle or "Rev 0")),
+    ], widths=(0.34, 0.66))
+
     return r"""
 \begin{titlepage}
 \thispagestyle{firstpage}
 \centering
-\vspace*{1.5cm}
+\vspace*{1.0cm}
 """ + logos_tex + r"""
+{\color{osdagDark}\rule{\linewidth}{1.2pt}}\\[0.8cm]
 {\Huge \textbf{OsdagBridge}}\\[0.3cm]
-{\large Open Source Software for Steel Girder Bridge Design}\\[1.5cm]
-{\Large Design Report}\\[1.5cm]
-\begin{tabular}{|L{4cm}|L{10cm}|}
-\hline
-\textbf{Project Name} & """ + _tex(m.project_name) + r""" \\
-\hline
-\textbf{Project Location} & """ + _tex(m.project_location) + r""" \\
-\hline
-\textbf{Author / Designer} & """ + _tex(m.designer) + r""" \\
-\hline
-\textbf{Reviewer} & """ + _tex(m.reviewer) + r""" \\
-\hline
-\textbf{Organization} & """ + _tex(m.company) + r""" \\
-\hline
-\textbf{Client Name and Organization} & """ + _tex(m.client) + r""" \\
-\hline
-\textbf{Job Number} & """ + _tex(m.job_number) + r""" \\
-\hline
-\textbf{Date} & """ + _tex(m.report_date) + r""" \\
-\hline
-\textbf{Report Version} & """ + (_tex(m.subtitle) if m.subtitle else '') + r""" \\
-\hline
-\end{tabular}
+{\large Open Source Software for Steel Girder Bridge Design}\\[1.2cm]
+{\LARGE \textbf{Design Report}}\\[0.4cm]
+{\large """ + _tex(m.project_name) + r"""}\\[1.2cm]
+{\color{osdagDark}\rule{\linewidth}{1.2pt}}\\[0.8cm]
+""" + info + r"""
+\vfill
+{\small\color{textMuted} Generated by OsdagBridge \textbullet{} FOSSEE, IIT Bombay}
 \end{titlepage}
+% the titlepage environment restarts numbering at 1; the title page is page 1
+\setcounter{page}{2}
 """
 
 
@@ -345,34 +305,32 @@ def title_page(m, osdag_logo, org_logo):
 
 def toc_section():
     return r"""
-% Chapter / TOC Formatting
-\titleformat{\chapter}[block]
-  {\normalfont\Large\bfseries\centering}{\thechapter}{1em}{}
-\titlespacing*{\chapter}{0pt}{0pt}{10pt}
-\setcounter{tocdepth}{2}
+% TOC Formatting
+\setcounter{tocdepth}{1}
 
-% TOC styling using titletoc
-\titlecontents{chapter}[1.5em]
-  {\normalfont\vspace{2pt}}
-  {\contentslabel{1.5em}}
-  {\hspace*{-1.5em}}
-  {\hfill\contentspage}
+\titlecontents{chapter}[1.8em]
+  {\addvspace{4pt}\normalfont\bfseries}
+  {\contentslabel{1.8em}}
+  {\hspace*{-1.8em}}
+  {\titlerule*[0.6pc]{.}\contentspage}
 
-\titlecontents{section}[3.8em]
+\titlecontents{section}[4.2em]
   {\normalfont}
-  {\contentslabel{2.3em}}
-  {\hspace*{-2.3em}}
-  {\hfill\contentspage}
+  {\contentslabel{2.4em}}
+  {\hspace*{-2.4em}}
+  {\titlerule*[0.6pc]{.}\contentspage}
 
-\titlecontents{subsection}[7.0em]
+\titlecontents{subsection}[7.4em]
   {\normalfont}
   {\contentslabel{3.2em}}
   {\hspace*{-3.2em}}
-  {\hfill\contentspage}
+  {\titlerule*[0.6pc]{.}\contentspage}
 
 \newpage
 \renewcommand{\contentsname}{\centering\Large\bfseries Table of Contents}
 \tableofcontents
+\listoftables
+\listoffigures
 """
 
 
@@ -449,189 +407,218 @@ class ReportResult:
     tex_path: Optional[str]
 
 
+class TransverseMemberData:
+    """Read-only access to the design results of one transverse member group:
+    cross bracing ("cb") or end diaphragms ("ed"). Both groups are stored in
+    output_dict with the same layout, only the top-level keys differ."""
+
+    _SOURCES = {
+        "cb": ("crossbracing_forces_dict", "crossbracing_design_results",
+               ("transverse_member_design.cb.section_properties.bracing",),
+               ("transverse_member_design.cb.section_properties.bottom_chord",
+                "transverse_member_design.cb.section_properties.top_chord")),
+        "ed": ("end_diaphragm_forces_dict", "end_diaphragm_design_results",
+               ("transverse_member_design.ed.section_properties.end_diaphragm",
+                "transverse_member_design.ed.section_properties.bracing"),
+               ("transverse_member_design.ed.section_properties.bottom_chord",
+                "transverse_member_design.ed.section_properties.top_chord")),
+    }
+
+    def __init__(self, output_dict: dict, kind: str = "cb"):
+        self.output_dict = output_dict
+        self.kind = kind
+        self._forces_key, self._designs_key, self._diag_pfx, self._chord_pfx = self._SOURCES[kind]
+
+    def _forces(self) -> dict:
+        return self.output_dict.get(self._forces_key, {}) or {}
+
+    def _designs(self) -> dict:
+        return self.output_dict.get(self._designs_key, {}) or {}
+
+    def _osdag(self, pair: str, member: str, force_type: str) -> dict:
+        """_extract_osdag_summary dict for one member ("diagonal"/"chord", "tension"/"compression")."""
+        from osdagbridge.core.bridge_types.plate_girder.results_data import _extract_osdag_summary
+        try:
+            raw = self._designs()[pair][member][force_type]
+            return _extract_osdag_summary(raw or {})
+        except (KeyError, TypeError):
+            return {}
+
+    def _pair(self, pair: str) -> dict:
+        try:
+            return self._forces()["pairs"][pair] or {}
+        except (KeyError, TypeError):
+            return {}
+
+    @staticmethod
+    def _pfx(member: str) -> str:
+        return "diag" if member == "diagonal" else "chord"
+
+    def pairs(self) -> list:
+        """Sorted girder pair keys e.g. ['G1-G2', 'G2-G3']."""
+        try:
+            return sorted((self._forces().get("pairs") or {}).keys())
+        except Exception:
+            return []
+
+    def geometry(self) -> dict:
+        return self._forces().get("geometry", {}) or {}
+
+    def brace_type(self) -> str:
+        return self._forces().get("brace_type", "X") or "X"
+
+    def has_chord(self, which: str) -> bool:
+        """which: 'top' or 'bottom'."""
+        key = f"member_properties.cross_bracing_details.{which}_chord" if self.kind == "cb" else None
+        if key and key in self.output_dict:
+            return bool(self.output_dict.get(key))
+        return bool(self._forces().get(f"{which}_chord", True))
+
+    def force(self, pair: str, member: str, force_type: str) -> str:
+        val = self._pair(pair).get(f"{self._pfx(member)}_{force_type}_kN")
+        return f"{val:.3f}" if val is not None else ""
+
+    def nature(self, pair: str, member: str) -> str:
+        p, pf = self._pair(pair), self._pfx(member)
+        has_t = p.get(f"{pf}_tension_kN") is not None
+        has_c = p.get(f"{pf}_compression_kN") is not None
+        return "T / C" if (has_t and has_c) else ("T" if has_t else ("C" if has_c else ""))
+
+    def governing_force(self, pair: str, member: str) -> tuple:
+        """(force_kN_str, force_type) of the larger absolute force."""
+        p, pf = self._pair(pair), self._pfx(member)
+        t_val = p.get(f"{pf}_tension_kN")
+        c_val = p.get(f"{pf}_compression_kN")
+        if t_val is not None and c_val is not None:
+            if abs(c_val) >= abs(t_val):
+                return (f"{c_val:.3f}", "compression")
+            return (f"{t_val:.3f}", "tension")
+        if c_val is not None:
+            return (f"{c_val:.3f}", "compression")
+        if t_val is not None:
+            return (f"{t_val:.3f}", "tension")
+        return ("", "compression")
+
+    def has_forces(self) -> bool:
+        """True when the analysis produced at least one member force."""
+        for pair in self.pairs():
+            if any(v is not None for k, v in self._pair(pair).items() if str(k).endswith("_kN")):
+                return True
+        return False
+
+    def section(self, pair: str, member: str, force_type: str) -> str:
+        val = self._osdag(pair, member, force_type).get("section")
+        if not val and self.kind == "ed":
+            # no Osdag design yet: fall back to the section chosen in the inputs
+            try:
+                i = int(pair.split("-")[0].lstrip("G"))
+                val = self.output_dict.get(
+                    f"{KEY_MP_ED_BRACING_SECTION_DESIGNATION}.G{i}G{i + 1}.E{i}M1")
+            except (ValueError, IndexError):
+                val = None
+        return _tex(val) if val else ""
+
+    def capacity(self, pair: str, member: str, force_type: str) -> str:
+        val = self._osdag(pair, member, force_type).get("capacity_kN")
+        return f"{float(val):.3f}" if val is not None else ""
+
+    def efficiency(self, pair: str, member: str, force_type: str) -> str:
+        val = self._osdag(pair, member, force_type).get("efficiency")
+        return f"{float(val):.3f}" if val is not None else ""
+
+    def slenderness(self, pair: str, member: str) -> str:
+        # compression result first — slenderness governs there
+        for ft in ("compression", "tension"):
+            val = self._osdag(pair, member, ft).get("slenderness")
+            if val is not None:
+                return f"{float(val):.1f}"
+        return ""
+
+    def status(self, pair: str, member: str, force_type: str) -> str:
+        try:
+            val = self._osdag(pair, member, force_type).get("efficiency")
+            if val is not None:
+                return status_tex("PASS" if float(val) <= 1.0 else "FAIL")
+        except (TypeError, ValueError):
+            pass
+        return ""
+
+    def gov_lc(self, pair: str, member: str, force_type: str) -> str:
+        val = self._pair(pair).get(f"{self._pfx(member)}_{force_type}_gov_lc")
+        return _tex(val) if val else ""
+
+    def connection(self, pair: str, member: str, force_type: str) -> str:
+        val = self._osdag(pair, member, force_type).get("connection")
+        return str(val) if val else ""
+
+    def effective_length(self, member: str) -> str:
+        """KL in mm from the panel geometry."""
+        try:
+            geom = self.geometry()
+            L_m = geom.get("diagonal_length_m", 0) if member == "diagonal" else geom.get("horiz_proj_m", 0)
+            return f"{float(L_m) * 1000:.0f}" if L_m else ""
+        except (TypeError, ValueError):
+            return ""
+
+    def section_props(self, pair: str, member: str) -> tuple:
+        """(A in mm², r_min in mm) strings for the member section."""
+        pair_id = pair.replace("-", "")
+        for pfx in (self._diag_pfx if member == "diagonal" else self._chord_pfx):
+            area_cm2 = self.output_dict.get(f"{pfx}.{pair_id}.A")
+            if area_cm2 is None:
+                continue
+            rv_cm = self.output_dict.get(f"{pfx}.{pair_id}.rv")
+            return (f"{float(area_cm2) * 100:.1f}",
+                    f"{float(rv_cm) * 10:.1f}" if rv_cm is not None else "")
+        return ("", "")
+
+    def max_ur(self):
+        """Largest member UR in this group (None if nothing was designed)."""
+        best = None
+        for pair in self.pairs():
+            for member in ("diagonal", "chord"):
+                for ft in ("compression", "tension"):
+                    try:
+                        u = float(self.efficiency(pair, member, ft))
+                    except (TypeError, ValueError):
+                        continue
+                    best = u if best is None else max(best, u)
+        return best
+
+
 class ReportDataBridge:
     """Centralized data extraction for the OsdagBridge report."""
-
-
 
     def __init__(self, output_dict: dict, input_dict: dict, payload: "ReportPayload"):
         self.output_dict = output_dict
         self.input_dict = input_dict
         self.payload = payload
+        self.cb = TransverseMemberData(output_dict, "cb")
+        self.ed = TransverseMemberData(output_dict, "ed")
 
-
-    # =====================================================================
-    # CHAPTER 5: CROSS BRACING
-    # =====================================================================
-
-    def _cb_forces_dict(self) -> dict:
-        """Internal: return crossbracing_forces_dict from output_dict."""
-        return self.output_dict.get("crossbracing_forces_dict", {})
-
-    def _cb_pair_designs(self) -> dict:
-        """Internal: return crossbracing_design_results from output_dict."""
-        return self.output_dict.get("crossbracing_design_results", {})
-
-    def _cb_osdag(self, pair: str, member: str, force_type: str) -> dict:
-        """
-        Extract the _extract_osdag_summary dict for one member.
-        pair      e.g. "G1-G2"
-        member    "diagonal" or "chord"
-        force_type "tension" or "compression"
-        """
-        from osdagbridge.core.bridge_types.plate_girder.results_data import _extract_osdag_summary
-        try:
-            raw = self._cb_pair_designs()[pair][member][force_type]
-            return _extract_osdag_summary(raw or {})
-        except (KeyError, TypeError):
-            return {}
-
-    def get_cb_pairs(self) -> list:
-        """Return sorted list of girder pair keys e.g. ['G1-G2', 'G2-G3']."""
-        try:
-            return sorted(self._cb_forces_dict().get("pairs", {}).keys())
-        except Exception:
-            return []
-
-    def get_cb_geometry(self) -> dict:
-        """Return the geometry sub-dict from forces_dict."""
-        return self._cb_forces_dict().get("geometry", {})
-
-    def get_cb_brace_type(self) -> str:
-        try:
-            return self._cb_forces_dict().get("brace_type", "X")
-        except Exception:
-            return "X"
-
-    # --- Table 5.20(a): Member Forces ---
-
-    def get_cb_force(self, pair: str, member: str, force_type: str) -> str:
-        """
-        Return demand force string for table 5.20(a).
-        member: "diagonal" or "chord"
-        force_type: "tension" or "compression"
-        """
-        try:
-            pairs = self._cb_forces_dict()["pairs"][pair]
-            key = f"diag_{force_type}_kN" if member == "diagonal" else f"chord_{force_type}_kN"
-            val = pairs.get(key)
-            if val is not None:
-                return f"{val:.3f}"
-        except (KeyError, TypeError):
-            pass
-        return ""
-
-    def get_cb_nature(self, pair: str, member: str) -> str:
-        """Return 'T', 'C', or 'T/C' depending on what forces exist for this member."""
-        try:
-            pairs = self._cb_forces_dict()["pairs"][pair]
-            t_key = "diag_tension_kN"     if member == "diagonal" else "chord_tension_kN"
-            c_key = "diag_compression_kN" if member == "diagonal" else "chord_compression_kN"
-            has_t = pairs.get(t_key) is not None
-            has_c = pairs.get(c_key) is not None
-            if has_t and has_c:
-                return "T / C"
-            if has_t:
-                return "T"
-            if has_c:
-                return "C"
-        except (KeyError, TypeError):
-            pass
-        return ""
-
-    def get_cb_governing_force(self, pair: str, member: str) -> tuple:
-        """
-        Return (force_kN_str, force_type) for the governing (max absolute) force.
-        Used as the single demand value for capacity tables.
-        """
-        try:
-            pairs = self._cb_forces_dict()["pairs"][pair]
-            t_key = "diag_tension_kN"     if member == "diagonal" else "chord_tension_kN"
-            c_key = "diag_compression_kN" if member == "diagonal" else "chord_compression_kN"
-            t_val = pairs.get(t_key)
-            c_val = pairs.get(c_key)
-            if t_val is not None and c_val is not None:
-                if abs(c_val) >= abs(t_val):
-                    return (f"{c_val:.3f}", "compression")
-                return (f"{t_val:.3f}", "tension")
-            if c_val is not None:
-                return (f"{c_val:.3f}", "compression")
-            if t_val is not None:
-                return (f"{t_val:.3f}", "tension")
-        except (KeyError, TypeError):
-            pass
-        return ("", "compression")
-
-    def get_cb_section(self, pair: str, member: str, force_type: str) -> str:
-        """Section designation for a member e.g. '75 x 75 x 8'."""
-        val = self._cb_osdag(pair, member, force_type).get("section")
-        return _tex(val) if val else ""
-
-    def get_cb_capacity(self, pair: str, member: str, force_type: str) -> str:
-        """Capacity in kN."""
-        val = self._cb_osdag(pair, member, force_type).get("capacity_kN")
-        return f"{float(val):.3f}" if val is not None else ""
-
-    def get_cb_efficiency(self, pair: str, member: str, force_type: str) -> str:
-        """Utilization ratio (efficiency)."""
-        val = self._cb_osdag(pair, member, force_type).get("efficiency")
-        return f"{float(val):.3f}" if val is not None else ""
-
-    def get_cb_slenderness(self, pair: str, member: str) -> str:
-        """KL/r — same for tension and compression (geometry-based)."""
-        # Prefer compression result (slenderness is more meaningful there)
-        for ft in ("compression", "tension"):
-            val = self._cb_osdag(pair, member, ft).get("slenderness")
-            if val is not None:
-                return f"{float(val):.1f}"
-        return ""
-
-    def get_cb_status(self, pair: str, member: str, force_type: str) -> str:
-        """PASS / FAIL based on UR <= 1.0."""
-        try:
-            val = self._cb_osdag(pair, member, force_type).get("efficiency")
-            if val is not None:
-                ur = float(val)
-                if ur <= 1.0:
-                    return r"\textcolor{black}{PASS}"
-                return r"\textcolor{red}{FAIL}"
-        except (TypeError, ValueError):
-            pass
-        return ""
-
-    def get_cb_gov_lc(self, pair: str, member: str, force_type: str) -> str:
-        """Governing load case label for member (tension or compression)."""
-        try:
-            pfx = "diag" if member == "diagonal" else "chord"
-            key = f"{pfx}_{force_type}_gov_lc"
-            val = self._cb_forces_dict()["pairs"][pair].get(key)
-            return _tex(val) if val else ""
-        except (KeyError, TypeError):
-            return ""
-
-    def get_cb_connection(self, pair: str, member: str, force_type: str) -> str:
-        """Return 'Welded' or 'Bolted'."""
-        val = self._cb_osdag(pair, member, force_type).get("connection")
-        return str(val) if val else ""
-
-    def get_cb_effective_length(self, member: str) -> str:
-        """Effective length KL in mm from geometry."""
-        try:
-            geom = self.get_cb_geometry()
-            if member == "diagonal":
-                L_m = geom.get("diagonal_length_m", 0)
-            else:
-                L_m = geom.get("horiz_proj_m", 0)
-            return f"{L_m * 1000:.0f}"   # convert m → mm
-        except (TypeError, ValueError):
-            return ""
+    # Older chapter code calls the get_cb_* helpers directly; keep them as
+    # thin wrappers around the cross-bracing accessor.
+    def get_cb_pairs(self):                       return self.cb.pairs()
+    def get_cb_geometry(self):                    return self.cb.geometry()
+    def get_cb_brace_type(self):                  return self.cb.brace_type()
+    def get_cb_force(self, p, m, f):              return self.cb.force(p, m, f)
+    def get_cb_nature(self, p, m):                return self.cb.nature(p, m)
+    def get_cb_governing_force(self, p, m):       return self.cb.governing_force(p, m)
+    def get_cb_section(self, p, m, f):            return self.cb.section(p, m, f)
+    def get_cb_capacity(self, p, m, f):           return self.cb.capacity(p, m, f)
+    def get_cb_efficiency(self, p, m, f):         return self.cb.efficiency(p, m, f)
+    def get_cb_slenderness(self, p, m):           return self.cb.slenderness(p, m)
+    def get_cb_status(self, p, m, f):             return self.cb.status(p, m, f)
+    def get_cb_gov_lc(self, p, m, f):             return self.cb.gov_lc(p, m, f)
+    def get_cb_connection(self, p, m, f):         return self.cb.connection(p, m, f)
+    def get_cb_effective_length(self, m):         return self.cb.effective_length(m)
 
     def get_cb_alpha_deg(self) -> str:
-        """Diagonal angle in degrees."""
         try:
-            return f"{self.get_cb_geometry().get('alpha_deg', 0):.2f}"
+            return f"{self.cb.geometry().get('alpha_deg', 0):.2f}"
         except Exception:
             return ""
+
 
 def _format_project_location(pl_data):
     if not pl_data:
@@ -930,10 +917,6 @@ def generate_report(payload, request):
 
             doc_parts.append(ch7_quantities(payload.inputs))
 
-            mode = str(payload.inputs.get(KEY_DESIGN_MODE, "Optimized")).strip().lower()
-            is_custom = mode in {"custom", "customized"}
-        
-
             doc_parts.append(ch8_design_log(payload.log_entries, payload.inputs))
 
             doc_parts.append(references())
@@ -953,8 +936,11 @@ def generate_report(payload, request):
             with open(tmp_tex, 'w', encoding='utf-8') as f:
                 f.write(full_tex)
 
-            # Compile twice for TOC and references
-            for _ in range(2):
+            # Compile until cross-references, the TOC and longtable column
+            # widths settle (longtable may need a third pass).
+            tmp_log = os.path.join(tmp_dir, request.file_stem + '.log')
+            log_text = ''
+            for _pass in range(1, 4):
                 try:
                     kwargs = {
                         'cwd': tmp_dir,
@@ -965,13 +951,25 @@ def generate_report(payload, request):
                     }
                     if os.name == 'nt':
                         kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
-                    
+
                     res = subprocess.run(
                         [compiler, '-interaction=nonstopmode', request.file_stem + '.tex'],
                         **kwargs
                     )
                 except Exception as exc:
                     logger.warning(f"pdflatex run failed: {exc}")
+                    break
+                log_text = ''
+                if os.path.exists(tmp_log):
+                    with open(tmp_log, encoding='utf-8', errors='ignore') as fh:
+                        log_text = fh.read()
+                if _pass >= 2 and 'Rerun' not in log_text:
+                    break
+
+            # Surface LaTeX errors instead of silently shipping a broken PDF
+            errors = [ln for ln in log_text.splitlines() if ln.startswith('! ')] if log_text else []
+            if errors:
+                logger.warning("pdflatex reported %d error(s); first: %s", len(errors), errors[0])
 
             if os.path.exists(tmp_tex):
                 shutil.copy2(tmp_tex, tex_path)

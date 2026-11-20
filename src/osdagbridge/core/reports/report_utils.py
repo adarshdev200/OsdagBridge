@@ -22,14 +22,34 @@ def _tex(value):
                     ('~', r'\textasciitilde{}'), ('^', r'\^{}')]:
         s = s.replace(ch, esc)
     s = s.replace(':', r':\allowbreak{}')
+    # math glyphs that appear in check names (e.g. "Leg ≤ H_limit"); done after
+    # escaping so the inserted $...$ is not escaped again
+    for uni, tex in [('≤', r'$\leq$'), ('≥', r'$\geq$'), ('±', r'$\pm$'), ('°', r'$^\circ$')]:
+        s = s.replace(uni, tex)
     return s
+
+
+def _num_str(val):
+    """Readable number: floats lose binary noise (11.899999999999999 -> 11.9)
+    but keep their significant digits; everything else is passed through."""
+    if isinstance(val, bool) or not isinstance(val, float):
+        return val
+    if val != val:  # NaN
+        return ""
+    if abs(val) >= 1e6:
+        return f"{val:.0f}"
+    s = format(val, ".6g")
+    if "e" in s:
+        s = f"{val:.6f}".rstrip("0").rstrip(".")
+    # keep one decimal on whole numbers so "30.0 m" reads like the inputs
+    return s if "." in s else s + ".0"
 
 
 def _render_value(source_dict, key, unit=""):
     val = source_dict.get(key)
     if val in ("", None):
         return ""
-    return _tex(val) + unit
+    return _tex(_num_str(val)) + unit
 
 
 def get_girder_entries(input_dict):
@@ -86,8 +106,8 @@ def _fig_or_placeholder(path, caption, width=r'0.9\textwidth'):
                 r'\end{figure}')
     return (r'\begin{figure}[H]' + '\n'
             r'\centering' + '\n'
-            r'\fbox{\parbox{0.97\textwidth}{' + '\n'
-            r'\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
+            r'\fbox{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{' + '\n'
+            r'\centering\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
             r'}}' + '\n'
             r'\caption*{' + caption + '}\n'
             r'\end{figure}')
@@ -100,16 +120,13 @@ def _fig_embed(path, caption, width=r'\textwidth', height=None):
         if height:
             opts += ',height=' + height + ',keepaspectratio'
         return (r'\begin{figure}[H]' + '\n'
-                r'\vspace{-0.5em}' + '\n'
                 r'\centering' + '\n'
                 r'\includegraphics[' + opts + ']{' + p + '}\n'
-                r'\vspace{0.5em}' + '\n'
-                r'\caption*{\small ' + caption + '}\n'
-                r'\vspace{-0.5em}' + '\n'
+                r'\caption{' + caption + '}\n'
                 r'\end{figure}')
-    # fbox placeholder — matches template exactly
-    return (r'\noindent\fbox{\parbox{0.97\textwidth}{' + '\n'
-            r'\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
-            r'}}')
+    # placeholder box: own paragraph, exactly the text width
+    return (r'\par\medskip\noindent\fbox{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{' + '\n'
+            r'\centering\textit{[ PLACEHOLDER: ' + caption + r' ]}' + '\n'
+            r'}}\par\medskip')
 
 

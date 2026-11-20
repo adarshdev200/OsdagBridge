@@ -11,8 +11,14 @@ dependencies:
   # main application
   - osdag::osdag
 
+  # desktop GUI (same pins as requirements.txt / conda-recipe)
+  - pyside6>=6.5.0,<=6.9.3
+  - ifcopenshell
+  - openpyxl
+
   # bridge-specific
   - matplotlib
+  - pylatex
   - fiona
   - shapely
   - scipy>=1.10.1

@@ -66,6 +66,12 @@ def calculate_material_quantities(inputs: dict, outputs: dict) -> dict:
         "bracing_diag_wt_single": "N.A.",
         "bracing_diag_wt_total": "N.A.",
         
+        "end_diaphragm_vol_formula": r"\placeholder{Area $\times$ Length}",
+        "end_diaphragm_qty": "N.A.",
+        "end_diaphragm_vol_total": "N.A.",
+        "end_diaphragm_wt_single": "N.A.",
+        "end_diaphragm_wt_total": "N.A.",
+
         "concrete_deck_vol_formula": r"\placeholder{Width $\times$ Thickness $\times$ Length}",
         "concrete_deck_qty": "N.A.",
         "concrete_deck_vol_total": "N.A.",
@@ -330,7 +336,10 @@ def calculate_material_quantities(inputs: dict, outputs: dict) -> dict:
                 quantities[f"{prefix}_wt_single"] = "N.A."
                 quantities[f"{prefix}_wt_total"] = "N.A."
 
-        # 6. Crash Barrier (Cu.m) and Weight (MT)
+        # 6. End diaphragms — one line of diaphragms at each support
+        _end_diaphragm_quantities(quantities, inputs, outputs, n_girders)
+
+        # 7. Crash Barrier (Cu.m) and Weight (MT)
         KEY_CB_AREA = "typical_section.crash_barrier.area"
         cb_area = 0.0
         cb_area_val = inputs.get(KEY_CB_AREA)
@@ -364,3 +373,62 @@ def calculate_material_quantities(inputs: dict, outputs: dict) -> dict:
         logger.warning(f"Error calculating material quantities: {exc}")
 
     return quantities
+
+
+def _end_diaphragm_quantities(quantities: dict, inputs: dict, outputs: dict, n_girders: int) -> None:
+    """Steel in the end diaphragms. A beam diaphragm is one member of length =
+    girder spacing per bay; a braced diaphragm is two diagonals plus top and
+    bottom chords per bay. Section areas are stored in cm²."""
+    if n_girders < 2:
+        return
+    try:
+        spacing = float(inputs.get(KEY_TS_GIRDER_SPACING) or 0.0)
+    except (TypeError, ValueError):
+        spacing = 0.0
+    if spacing <= 0:
+        return
+
+    geom = (outputs.get("end_diaphragm_forces_dict") or {}).get("geometry") or {}
+    diag_len = geom.get("diagonal_length_m")
+
+    base = "transverse_member_design.ed.section_properties"
+
+    def area_m2(member, pair_id):
+        for name in ((member,) if member != "end_diaphragm" else ("end_diaphragm", "bracing")):
+            val = outputs.get(f"{base}.{name}.{pair_id}.A")
+            if val is not None:
+                try:
+                    return float(val) / 1e4
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+
+    vol_per_support = 0.0
+    bays = 0
+    for i in range(1, n_girders):
+        pair_id = f"G{i}G{i + 1}"
+        a_main = area_m2("end_diaphragm", pair_id)
+        a_top = area_m2("top_chord", pair_id)
+        a_bot = area_m2("bottom_chord", pair_id)
+        if a_main <= 0 and a_top <= 0 and a_bot <= 0:
+            continue
+        bays += 1
+        if diag_len and (a_top > 0 or a_bot > 0):
+            vol_per_support += 2 * a_main * float(diag_len) + (a_top + a_bot) * spacing
+        else:
+            vol_per_support += a_main * spacing
+
+    if bays == 0 or vol_per_support <= 0:
+        for k in ("vol_formula", "qty", "vol_total", "wt_single", "wt_total"):
+            quantities[f"end_diaphragm_{k}"] = "N.A."
+        return
+
+    n_supports = 2
+    vol_single = vol_per_support / bays
+    vol_total = vol_per_support * n_supports
+    quantities["end_diaphragm_vol_formula"] = (
+        f"${vol_single:.5f}\\text{{ m}}^3$ per bay")
+    quantities["end_diaphragm_qty"] = str(bays * n_supports)
+    quantities["end_diaphragm_vol_total"] = f"{vol_total:.3f}"
+    quantities["end_diaphragm_wt_single"] = f"{vol_single * 7.85:.3f}"
+    quantities["end_diaphragm_wt_total"] = f"{vol_total * 7.85:.2f}"

@@ -915,7 +915,7 @@ def generate_report(payload, request):
             if 'drawings' in secs and payload.options.include_figures:
                 doc_parts.append(ch6_drawings(fig_paths))
 
-            doc_parts.append(ch7_quantities(payload.inputs))
+            doc_parts.append(ch7_quantities(payload.inputs, asset_dir=tmp_images if payload.options.include_figures else None))
 
             doc_parts.append(ch8_design_log(payload.log_entries, payload.inputs))
 

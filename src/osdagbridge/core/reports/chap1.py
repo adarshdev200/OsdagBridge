@@ -1,4 +1,5 @@
 from osdagbridge.core.reports.report_utils import _tex
+from osdagbridge.core.reports.tables import kv_table
 
 
 def ch1_project_info(m):
@@ -10,23 +11,16 @@ This section records all project metadata as entered by the designer.
 \section{Project and Design Team Details}
 \label{sec:project-details}
 
-\begin{tabular}{|L{5.5cm}|L{8.5cm}|}
-\hline
-\textbf{Project Name} & """ + _tex(m.project_name) + r""" \\
-\hline
-\textbf{Project Location} & """ + _tex(m.project_location) + r""" \\
-\hline
-\textbf{Designer} & """ + _tex(m.designer) + r""" \\
-\hline
-\textbf{Reviewer} & """ + _tex(m.reviewer) + r""" \\
-\hline
-\textbf{Organization} & """ + _tex(m.company) + r""" \\
-\hline
-\textbf{Client} & """ + _tex(m.client) + r""" \\
-\hline
-\textbf{Software Version} & OsdagBridge \\
-\hline
-\end{tabular}
+""" + kv_table("Project and Design Team Details", [
+        ("Project Name", _tex(m.project_name)),
+        ("Project Location", _tex(m.project_location)),
+        ("Designer", _tex(m.designer)),
+        ("Reviewer", _tex(m.reviewer)),
+        ("Organization", _tex(m.company)),
+        ("Client", _tex(m.client)),
+        ("Job Number", _tex(m.job_number)),
+        ("Software", "OsdagBridge"),
+    ], with_unit=False, headers=("Item", "Details"), widths=(0.34, 0.66)) + r"""
 
 
 \section{Applicable Codes and Standards}

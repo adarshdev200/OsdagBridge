@@ -1,3 +1,6 @@
+from osdagbridge.core.reports.styles import THEME
+
+
 def ch6_drawings(fig_paths):
     """Chapter 6 – Drawings and Visualizations.
 
@@ -29,14 +32,15 @@ def ch6_drawings(fig_paths):
             return (r'\begin{figure}[H]' + '\n'
                     r'\centering' + '\n'
                     r'\vspace{4pt}' + '\n'
-                    r'\includegraphics[width=0.85\textwidth]{' + p + '}\n'
+                    r'\includegraphics[width=' + THEME.chart.drawing_width + ',height='
+                    + THEME.chart.drawing_max_height + ',keepaspectratio]{' + p + '}\n'
                     r'\caption{' + title + '}\n'
                     + label_tex
                     + r'\end{figure}' + '\n'
                     )
         return (r'\begin{figure}[H]' + '\n'
                 r'\centering' + '\n'
-                r'\fbox{\parbox{0.97\textwidth}{' + '\n'
+                r'\fbox{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{' + '\n'
                 r'\textit{[ PLACEHOLDER: ' + ' ' + title + r' ]}' + '\n'
                 r'}}' + '\n'
                 r'\caption{' + title + '}\n'

@@ -1,48 +1,65 @@
 from typing import List
 
+from osdagbridge.core.reports.report_utils import _tex
+from osdagbridge.core.reports.tables import ReportTable
 from osdagbridge.core.utils.common import (
     KEY_DESIGN_MODE
 )
 
 
 def ch8_design_log(log_entries: List[str], input_dict: dict) -> str:
-    """Render Chapter 8 using real log_entries, matching Osdag color convention."""
-
+    """Chapter 8 — standards, assumptions and the design log of the last run
+    (Osdag colour convention: info green, warning blue, error red)."""
     lines_tex = []
-    if log_entries:
-        for entry in log_entries:
-            for raw_line in entry.split('\n'):
-                line = raw_line.strip()
-                if not line:
-                    continue
-                escaped = (line
-                    .replace('_', r'\_')
-                    .replace('%', r'\%')
-                    .replace('&', r'\&')
-                    .replace('#', r'\#'))
-                upper = line.upper()
-                if 'WARNING' in upper:
-                    lines_tex.append(
-                        rf'\textcolor{{blue}}{{{escaped}}}\\')
-                elif 'ERROR' in upper:
-                    lines_tex.append(
-                        rf'\textcolor{{red}}{{{escaped}}}\\')
-                elif 'INFO' in upper:
-                    lines_tex.append(
-                        rf'\textcolor{{osdagGreen}}{{{escaped}}}\\')
-                else:
-                    continue  # skip lines without a known level — Osdag patter
+    for entry in log_entries or []:
+        for raw_line in str(entry).split('\n'):
+            line = raw_line.strip()
+            if not line:
+                continue
+            upper = line.upper()
+            if 'ERROR' in upper:
+                colour = 'failRed'
+            elif 'WARNING' in upper:
+                colour = 'blue'
+            elif 'INFO' in upper:
+                colour = 'osdagGreen'
+            else:
+                continue  # skip lines without a known level — Osdag pattern
+            lines_tex.append(r'\item \textcolor{' + colour + '}{' + _tex(line) + '}')
 
     mode = str(input_dict.get(KEY_DESIGN_MODE, 'Optimized')).strip().lower()
     is_custom = mode in {'custom', 'customized'}
-    return _ch8_assumptions(is_custom)
+    return _ch8_assumptions(is_custom) + _design_log_section(lines_tex)
+
+
+def _design_log_section(lines_tex: List[str]) -> str:
+    if not lines_tex:
+        return ""
+    return (r"""
+\section{Design Log}
+\label{sec:design-log}
+
+Messages recorded during the last design run.
+
+{\footnotesize
+\begin{itemize}[label={}, leftmargin=0pt, itemsep=0pt, parsep=0pt, topsep=2pt]
+""" + "\n".join(lines_tex) + r"""
+\end{itemize}
+}
+""")
+
+
+def _code_table(caption, rows, scope="Title / Scope"):
+    t = ReportTable(caption, [("Code", "L", 0.18), ("Year", "C", 0.10), (scope, "L", 0.72)])
+    t.add_rows(rows)
+    return t.dumps()
 
 
 def _ch8_assumptions(is_custom: bool) -> str:
     assumptions = [
         r"""
 \chapter{Standards \& Assumptions}
-\label{ch:Design Standards}
+\label{ch:design-standards}
 
 This section provides references to standards used to calibrate the OsdagBridge
 design modules, and notes the limitations of the current software version.
@@ -53,55 +70,22 @@ design modules, and notes the limitations of the current software version.
 The following Indian Road Congress (IRC) codes and Indian Standards (IS) 
 form the basis of all design calculations in this software.
 
-\vspace{0.5cm}
-
-\begingroup
-\setlength{\tabcolsep}{3.5pt}
-\begin{table}[H]
-\caption{\textbf{IRC Codes}}
-\begin{tabular}{|c|c|p{13cm}|}
-\hline
-\textbf{Code} & \textbf{Year} & \textbf{Title / Scope} \\ 
-\hline
-IRC 5 & 2015 & General Features of Design - carriageway widths, kerb, footpath dimensions \\ 
-\hline
-IRC 6 & 2017 & Loads and Load Combinations - dead load, live load, impact, wind, temperature, etc. \\ 
-\hline
-IRC 22 & 2015 & Composite Construction (LS) - Composite section properties, ULS/SLS design, shear connectors \\ 
-\hline
-IRC 24 & 2010 & Steel Road Bridges (LS) - Stiffener design, skew angle limits, diaphragm requirements \\ 
-\hline
-IRC 112 & 2020 & Concrete Road Bridges - Deck slab flexure, shear, crack width, reinforcement \\ 
-\hline
-IRC SP 114 & 2018 & Seismic Design of Road Bridges \\ 
-\hline
-\end{tabular}
-\end{table}
-
-\begingroup
-\setlength{\tabcolsep}{3.5pt}
-\begin{table}[H]
-\caption{\textbf{IS Codes}}
-\begin{tabular}{|c|c|p{13cm}|}
-\hline
-\textbf{Code} & \textbf{Year} & \textbf{Scope} \\
-\hline
-IS 800 & 2007 & Steel construction - tension, compression, bending, shear, LTB, stiffeners, combined checks \\
-\hline
-IS 456 & 2000 & Concrete - simplified stress-block for deck moment capacity \\
-\hline
-IS 1786 & 2008 & Reinforcement steel properties \\
-\hline
-IS 1893 (Part 3) & 2014 & Earthquake resistant design \\
-\hline
-IS 2062 & 2011 & Structural steel - yield and ultimate strength by grade \\
-\hline
-\end{tabular}
-\end{table}
-
-\clearpage
+""" + _code_table("IRC Codes", [
+        ("IRC 5", "2015", "General Features of Design - carriageway widths, kerb, footpath dimensions"),
+        ("IRC 6", "2017", "Loads and Load Combinations - dead load, live load, impact, wind, temperature, etc."),
+        ("IRC 22", "2015", "Composite Construction (LS) - composite section properties, ULS/SLS design, shear connectors"),
+        ("IRC 24", "2010", "Steel Road Bridges (LS) - stiffener design, skew angle limits, diaphragm requirements"),
+        ("IRC 112", "2020", "Concrete Road Bridges - deck slab flexure, shear, crack width, reinforcement"),
+        ("IRC SP 114", "2018", "Seismic Design of Road Bridges"),
+    ]) + _code_table("IS Codes", [
+        ("IS 800", "2007", "Steel construction - tension, compression, bending, shear, LTB, stiffeners, combined checks"),
+        ("IS 456", "2000", "Concrete - simplified stress-block for deck moment capacity"),
+        ("IS 1786", "2008", "Reinforcement steel properties"),
+        ("IS 1893 (Part 3)", "2014", "Earthquake resistant design"),
+        ("IS 2062", "2011", "Structural steel - yield and ultimate strength by grade"),
+    ], scope="Scope") + r"""
 \section{Analysis and Design Assumptions of This Version}
-\label{sec:assumptions}
+\label{sec:version-assumptions}
 
 \textbf{Structural Analysis}
 

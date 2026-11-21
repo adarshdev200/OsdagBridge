@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QTextEdit, QTreeWidget, QTreeWidgetItem,
     QStackedWidget, QWidget, QFileDialog, QLabel, QMessageBox,
-    QGroupBox, QGridLayout,
+    QGroupBox, QGridLayout, QCheckBox,
 )
 from PySide6.QtCore import Qt
 from osdagbridge.core.reports.report_generator import (
@@ -313,6 +313,14 @@ class ReportOptionsDialog(QDialog):
 
         self.tree.expandAll()
 
+        # The PDF is compiled in a temporary folder; this keeps a copy of
+        # the LaTeX source (with its images) for editing outside OsdagBridge.
+        self.include_source = QCheckBox("Also save the LaTeX source (.zip)")
+        self.include_source.setToolTip(
+            "Saves <name>_latex_source.zip next to the PDF: the .tex file with its\n"
+            "figures and logos. Unzip and run pdflatex, or upload it to Overleaf.")
+        layout.addWidget(self.include_source)
+
         btn_layout = QHBoxLayout()
         preview_btn = QPushButton("Preview PDF")
         preview_btn.setObjectName("ghost")
@@ -532,7 +540,8 @@ class ReportOptionsDialog(QDialog):
             sections=checked_sections,
             include_figures=include_figures,
             include_toc=True,
-            include_pdf=True
+            include_pdf=True,
+            include_source=self.include_source.isChecked(),
         )
 
         return ReportRequest(

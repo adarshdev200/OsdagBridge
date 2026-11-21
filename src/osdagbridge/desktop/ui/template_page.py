@@ -1430,32 +1430,29 @@ class CustomWindow(QWidget):
                                     MessageBoxType.Information,
                             ).exec()
                     else:
+                        source_zip = getattr(result, 'source_zip', None)
                         CustomMessageBox(
                             title="Report Generated "
                                   "Successfully",
                             text=f"PDF report saved to:\n"
                                  f"{result.pdf_path}",
-                            informativeText=
-                                f"TeX source: "
-                                f"{result.tex_path or 'N/A'}",
+                            informativeText=(
+                                f"LaTeX source: {source_zip}"
+                                if source_zip else ""),
                             dialogType=MessageBoxType.Success,
                         ).exec()
                 else:
-                    tex_info = (
-                        result.tex_path
-                        if result.tex_path and
-                        os.path.exists(result.tex_path)
-                        else 'Not generated'
-                    )
+                    # say what actually went wrong, and where the
+                    # source went, instead of listing possible causes
+                    source_zip = getattr(result, 'source_zip', None)
+                    reason = getattr(result, 'message', '') or \
+                        "PDF could not be generated."
+                    saved = (
+                        f"\n\nThe LaTeX source was saved to:\n{source_zip}"
+                        if source_zip else "")
                     CustomMessageBox(
                         title="Report Generation Failed",
-                        text=(
-                            "PDF could not be generated.\n\n"
-                            "Possible causes:\n"
-                            "• pdflatex not installed\n"
-                            "• LaTeX compilation errors\n\n"
-                            f"TeX source:\n{tex_info}"
-                        ),
+                        text=reason + saved,
                         dialogType=MessageBoxType.Critical,
                     ).exec()
 

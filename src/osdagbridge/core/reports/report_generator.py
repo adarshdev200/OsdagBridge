@@ -93,9 +93,11 @@
 #                                                        ├── Copies logos & payload figures → assets/
 #                                                        ├── Calls 10 chapter functions → full_tex string
 #                                                        ├── Writes full_tex to tempdir/stem.tex
-#                                                        ├── subprocess.run(pdflatex) × 2 passes
+#                                                        ├── subprocess.run(pdflatex), up to 3 passes
 #                                                        ├── shutil.copy2(tmp_pdf → output_dir/stem.pdf)
-#                                                        └── returns ReportResult(pdf_path, tex_path)
+#                                                        ├── stem_latex_source.zip when asked for, or when
+#                                                        │   no PDF could be made (source_bundle.py)
+#                                                        └── returns ReportResult(pdf_path, source_zip, ...)
 #                                                                  │
 #                                                                  ▼
 #                                                      [template_page.py] _on_report_finished()
@@ -123,6 +125,7 @@ from osdagbridge.core.reports.styles import (
     THEME, status_tex, fancy_page_style, geometry_options, style_preamble,
 )
 from osdagbridge.core.reports.tables import simple_tabular
+from osdagbridge.core.reports.source_bundle import bundle_name, find_compiler, write_source_bundle
 from .executive_summary import executive_summary
 from .chap1 import ch1_project_info
 from .chap2 import ch2_input_parameters
@@ -364,6 +367,7 @@ class ReportOptions:
     include_figures: bool
     include_toc: bool
     include_pdf: bool
+    include_source: bool = False   # also save stem_latex_source.zip next to the PDF
 
 @dataclass
 class ReportRequest:
@@ -404,7 +408,10 @@ class ReportPayload:
 @dataclass
 class ReportResult:
     pdf_path: Optional[str]
-    tex_path: Optional[str]
+    tex_path: Optional[str] = None      # .tex inside source_zip, kept for older callers
+    source_zip: Optional[str] = None    # compilable LaTeX source (tex + images + logos)
+    message: str = ''                   # why there is no PDF, in words a user can act on
+    latex_errors: List[str] = field(default_factory=list)
 
 
 class TransverseMemberData:
@@ -822,8 +829,13 @@ _FIGURE_MAP = [
 
 def generate_report(payload, request):
     # type: (ReportPayload, ReportRequest) -> ReportResult
-    """Compile the full OsdagBridge Design Report to PDF (+ .tex source)."""
-    tex_path = None
+    """Compile the full OsdagBridge Design Report to PDF.
+
+    The LaTeX source is saved as a zip next to the PDF when
+    request.options.include_source is set, and always when no PDF could be
+    produced, so a failed compile still leaves something usable behind.
+    """
+    zip_path = None
     try:
         # Use OsdagLatexEnv to discover the bundled pdflatex path
         compiler = 'pdflatex'
@@ -839,14 +851,19 @@ def generate_report(payload, request):
         except Exception as e:
             logger.info("osdag_latex_env not found or failed to load. (%s)", e)
             
-        logger.info("Compiler: %s", compiler)
+        compiler_path = find_compiler(compiler)
+        logger.info("Compiler: %s", compiler_path or (compiler + " (not found)"))
 
         os.makedirs(request.output_dir, exist_ok=True)
 
         # fig_paths is built inside TemporaryDirectory (see below) after bytes are written
 
         pdf_path = os.path.join(request.output_dir, request.file_stem + '.pdf')
-        tex_path = os.path.join(request.output_dir, request.file_stem + '.tex')
+        zip_path = os.path.join(request.output_dir, bundle_name(request.file_stem))
+        # an old PDF/zip with the same name must not pass for this run's output
+        for stale in (pdf_path, zip_path):
+            if os.path.exists(stale):
+                os.remove(stale)
 
         # Write to temp dir first, compile there, then copy back
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -940,7 +957,15 @@ def generate_report(payload, request):
             # widths settle (longtable may need a third pass).
             tmp_log = os.path.join(tmp_dir, request.file_stem + '.log')
             log_text = ''
+            res = None
+            message = ''
+            if compiler_path is None:
+                message = ("pdflatex was not found on this computer, so no PDF could be made. "
+                           "Install a TeX distribution (TeX Live, MiKTeX or TinyTeX), or compile "
+                           "the saved LaTeX source in Overleaf.")
             for _pass in range(1, 4):
+                if compiler_path is None:
+                    break
                 try:
                     kwargs = {
                         'cwd': tmp_dir,
@@ -953,11 +978,12 @@ def generate_report(payload, request):
                         kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
 
                     res = subprocess.run(
-                        [compiler, '-interaction=nonstopmode', request.file_stem + '.tex'],
+                        [compiler_path, '-interaction=nonstopmode', request.file_stem + '.tex'],
                         **kwargs
                     )
                 except Exception as exc:
                     logger.warning(f"pdflatex run failed: {exc}")
+                    message = f"pdflatex could not be started: {exc}"
                     break
                 log_text = ''
                 if os.path.exists(tmp_log):
@@ -971,23 +997,35 @@ def generate_report(payload, request):
             if errors:
                 logger.warning("pdflatex reported %d error(s); first: %s", len(errors), errors[0])
 
-            if os.path.exists(tmp_tex):
-                shutil.copy2(tmp_tex, tex_path)
-            if os.path.exists(tmp_pdf):
+            pdf_made = os.path.exists(tmp_pdf)
+            if pdf_made:
                 shutil.copy2(tmp_pdf, pdf_path)
+            elif not message:
+                message = ("LaTeX stopped before a PDF was written"
+                           + (f": {errors[0][2:]}" if errors else ".")
+                           + " The LaTeX source and log were saved for checking.")
 
-        if os.path.exists(pdf_path):
+            source_zip = None
+            if request.options.include_source or not pdf_made:
+                source_zip = write_source_bundle(tmp_dir, zip_path, include_log=not pdf_made)
+
+        tex_in_zip = (request.file_stem + '.tex') if source_zip else None
+        if pdf_made:
             logger.info("Report generated: %s", pdf_path)
-            return ReportResult(pdf_path=pdf_path, tex_path=tex_path)
+            if source_zip:
+                logger.info("LaTeX source saved: %s", source_zip)
+            return ReportResult(pdf_path=pdf_path, tex_path=tex_in_zip, source_zip=source_zip,
+                                latex_errors=errors)
 
-        logger.error("pdflatex ran but no PDF was produced.")
-        if 'res' in locals():
-            logger.error("pdflatex STDOUT:\n%s", res.stdout.decode('utf-8', 'ignore'))
-            logger.error("pdflatex STDERR:\n%s", res.stderr.decode('utf-8', 'ignore'))
-        return ReportResult(pdf_path=None, tex_path=tex_path)
+        logger.error("No PDF was produced: %s", message)
+        if res is not None:
+            logger.error("pdflatex STDOUT:\n%s", res.stdout.decode('utf-8', 'ignore')[-4000:])
+            logger.error("pdflatex STDERR:\n%s", res.stderr.decode('utf-8', 'ignore')[-4000:])
+        return ReportResult(pdf_path=None, tex_path=tex_in_zip, source_zip=source_zip,
+                            message=message, latex_errors=errors)
 
     except Exception as exc:
         logger.error("generate_report failed: %s", exc, exc_info=True)
-        if tex_path and os.path.exists(tex_path):
-            return ReportResult(pdf_path=None, tex_path=tex_path)
-        return ReportResult(pdf_path=None, tex_path=None)
+        saved = zip_path if zip_path and os.path.exists(zip_path) else None
+        return ReportResult(pdf_path=None, source_zip=saved,
+                            message=f"Report generation failed: {exc}")
